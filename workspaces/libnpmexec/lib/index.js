@@ -5,7 +5,6 @@ const read = promisify(require('read'))
 const Arborist = require('@npmcli/arborist')
 const ciDetect = require('@npmcli/ci-detect')
 const log = require('proc-log')
-const npmlog = require('npmlog')
 const mkdirp = require('mkdirp-infer-owner')
 const npa = require('npm-package-arg')
 const pacote = require('pacote')
@@ -168,7 +167,6 @@ const exec = async (opts) => {
           const prompt = `Need to install the following packages:\n${
           addList
         }Ok to proceed? `
-          npmlog.clearProgress()
           const confirm = await read({ prompt, default: 'y' })
           if (confirm.trim().toLowerCase().charAt(0) !== 'y') {
             throw new Error('canceled')

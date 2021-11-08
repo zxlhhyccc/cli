@@ -1,5 +1,6 @@
 // called with all the options already set to their defaults
 
+const log = require('proc-log')
 const retrieveTag = require('./retrieve-tag.js')
 const semver = require('semver')
 const enforceClean = require('./enforce-clean.js')

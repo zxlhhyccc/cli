@@ -53,10 +53,6 @@ const tokenWithMocks = (options = {}) => {
     'proc-log': {
       info: log.info,
     },
-    npmlog: {
-      gauge: log.gauge,
-      newItem: log.newItem,
-    },
   } : {})
   const token = new MockedToken(mockRequests.npm || npm)
   return [token, reset]

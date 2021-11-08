@@ -1,18 +1,6 @@
 const Tracker = require('../lib/tracker.js')(class {})
 const t = require('tap')
 
-t.test('no npmlog', t => {
-  const tr = new Tracker()
-  t.doesNotThrow(() => {
-    tr.addTracker('testTracker')
-  })
-  t.doesNotThrow(() => {
-    tr.finishTracker('testTracker')
-  })
-
-  t.end()
-})
-
 t.test('adds tracker', t => {
   t.doesNotThrow(() => {
     const tr = new Tracker()

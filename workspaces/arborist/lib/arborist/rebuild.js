@@ -1,6 +1,7 @@
 // Arborist.rebuild({path = this.path}) will do all the binlinks and
 // bundle building needed.  Called by reify, and by `npm rebuild`.
 
+const log = require('proc-log')
 const localeCompare = require('@isaacs/string-locale-compare')('en')
 const { depth: dfwalk } = require('treeverse')
 const promiseAllRejectLate = require('promise-all-reject-late')
@@ -13,7 +14,6 @@ const {
   isNodeGypPackage,
   defaultGypInstallScript,
 } = require('@npmcli/node-gyp')
-const log = require('proc-log')
 
 const boolEnv = b => b ? '1' : ''
 const sortNodes = (a, b) =>

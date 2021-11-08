@@ -1,6 +1,7 @@
 const _progress = Symbol('_progress')
 const _onError = Symbol('_onError')
-const npmlog = require('npmlog')
+const _childTracker = Symbol('_childTracker')
+const proggy = require('proggy')
 
 module.exports = cls => class Tracker extends cls {
   constructor (options = {}) {
@@ -25,22 +26,15 @@ module.exports = cls => class Tracker extends cls {
       this[_onError](`Tracker "${section}" already exists`)
     } else if (!hasTracker && subsection === null) {
       // 1. no existing tracker, no subsection
-      // Create a new tracker from npmlog
-      // starts progress bar
-      if (this[_progress].size === 0) {
-        npmlog.enableProgress()
-      }
-
-      this[_progress].set(section, npmlog.newGroup(section))
+      // Create a new progress tracker
+      this[_progress].set(section, proggy.createTracker(section))
     } else if (!hasTracker && subsection !== null) {
       // 2. no parent tracker and subsection
       this[_onError](`Parent tracker "${section}" does not exist`)
     } else if (!hasTracker || !hasSubtracker) {
       // 3. existing parent tracker, no subsection tracker
-      // Create a new subtracker in this[_progress] from parent tracker
-      this[_progress].set(`${section}:${key}`,
-        this[_progress].get(section).newGroup(`${section}:${subsection}`)
-      )
+      // Create a new subtracker and update parents
+      this[_childTracker](section, subsection, key)
     }
     // 4. existing parent tracker, existing subsection tracker
     // skip it
@@ -72,27 +66,31 @@ module.exports = cls => class Tracker extends cls {
 
       // remove parent tracker
       this[_progress].get(section).finish()
-      this[_progress].delete(section)
-
-      // remove progress bar if all
-      // trackers are finished
-      if (this[_progress].size === 0) {
-        npmlog.disableProgress()
-      }
     } else if (!hasTracker && subsection === null) {
       // 1. no existing parent tracker, no subsection
       this[_onError](`Tracker "${section}" does not exist`)
     } else if (!hasTracker || hasSubtracker) {
       // 2. subtracker exists
       // Finish subtracker and remove from this[_progress]
-      this[_progress].get(`${section}:${key}`).finish()
-      this[_progress].delete(`${section}:${key}`)
+      this[_childTracker](section, subsection, key, true)
     }
     // 3. existing parent tracker, no subsection
+    // skip it
+  }
+
+  [_childTracker] (section, subsection, key, stop) {
+    const parentTracker = this[_progress].get(section)
+
+    if (stop) {
+      parentTracker.update(parentTracker.value + 1)
+      this[_progress].get(`${section}:${key}`).finish()
+    } else {
+      parentTracker.update(parentTracker.value, parentTracker.total + 1)
+      this[_progress].set(`${section}:${key}`, proggy.createTracker(`${section}:${subsection}`))
+    }
   }
 
   [_onError] (msg) {
-    npmlog.disableProgress()
     throw new Error(msg)
   }
 }

@@ -1,10 +1,10 @@
 const { delimiter } = require('path')
 
+const log = require('proc-log')
 const chalk = require('chalk')
 const ciDetect = require('@npmcli/ci-detect')
 const runScript = require('@npmcli/run-script')
 const readPackageJson = require('read-package-json-fast')
-const npmlog = require('npmlog')
 const log = require('proc-log')
 const noTTY = require('./no-tty.js')
 
@@ -42,45 +42,39 @@ const run = async ({
     },
   }
 
-  npmlog.disableProgress()
+  if (script === scriptShell) {
+    const isTTY = !noTTY()
 
-  try {
-    if (script === scriptShell) {
-      const isTTY = !noTTY()
+    if (isTTY) {
+      if (ciDetect()) {
+        return log.warn('exec', 'Interactive mode disabled in CI environment')
+      }
 
-      if (isTTY) {
-        if (ciDetect()) {
-          return log.warn('exec', 'Interactive mode disabled in CI environment')
-        }
+      locationMsg = locationMsg || ` at location:\n${colorize.dim(runPath)}`
 
-        locationMsg = locationMsg || ` at location:\n${colorize.dim(runPath)}`
-
-        output(`${
+      output(`${
           colorize.reset('\nEntering npm script environment')
         }${
           colorize.reset(locationMsg)
         }${
           colorize.bold('\nType \'exit\' or ^D when finished\n')
         }`)
-      }
     }
-    return await runScript({
-      ...flatOptions,
-      pkg,
-      banner: false,
-      // we always run in cwd, not --prefix
-      path: runPath,
-      stdioString: true,
-      event: 'npx',
-      args,
-      env: {
-        PATH: pathArr.join(delimiter),
-      },
-      stdio: 'inherit',
-    })
-  } finally {
-    npmlog.enableProgress()
   }
+  return await runScript({
+    ...flatOptions,
+    pkg,
+    banner: false,
+    // we always run in cwd, not --prefix
+    path: runPath,
+    stdioString: true,
+    event: 'npx',
+    args,
+    env: {
+      PATH: pathArr.join(delimiter),
+    },
+    stdio: 'inherit',
+  })
 }
 
 module.exports = run

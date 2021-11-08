@@ -1,5 +1,6 @@
 // mixin implementing the reify method
 
+const log = require('proc-log')
 const onExit = require('../signal-handling.js')
 const pacote = require('pacote')
 const AuditReport = require('../audit-report.js')
@@ -8,7 +9,6 @@ const npa = require('npm-package-arg')
 const semver = require('semver')
 const debug = require('../debug.js')
 const walkUp = require('walk-up-path')
-const log = require('proc-log')
 
 const { dirname, resolve, relative } = require('path')
 const { depth: dfwalk } = require('treeverse')

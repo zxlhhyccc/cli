@@ -1,5 +1,4 @@
 
-const NPMLOG = require('npmlog')
 const { LEVELS } = require('proc-log')
 
 const merge = (...objs) => objs.reduce((acc, obj) => ({ ...acc, ...obj }))
@@ -46,23 +45,6 @@ const mockLogs = (otherMocks = {}) => {
       }, {}),
       otherMocks['proc-log']
     ),
-    // Object.assign is important here because we need to assign
-    // mocked properties directly to npmlog and then mock with that
-    // object. This is necessary so tests can still directly set
-    // `log.level = 'silent'` anywhere in the test and have that
-    // that reflected in the npmlog singleton.
-    // XXX: remove with npmlog
-    npmlog: Object.assign(NPMLOG, merge(
-      // no-op all npmlog methods by default so tests
-      // dont output anything to the terminal
-      Object.keys(NPMLOG.levels).reduce((acc, k) => {
-        acc[k] = () => {}
-        return acc
-      }, {}),
-      // except collect timing logs
-      { timing: (...args) => logs.push(['timing', ...args]) },
-      otherMocks.npmlog
-    )),
   }
 
   return { logs, logMocks }

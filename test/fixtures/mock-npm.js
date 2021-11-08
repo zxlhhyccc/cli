@@ -3,7 +3,7 @@ const fs = require('fs').promises
 const path = require('path')
 const mockLogs = require('./mock-logs')
 const mockGlobals = require('./mock-globals')
-const log = require('../../lib/utils/log-shim')
+const log = require('proc-log')
 
 const RealMockNpm = (t, otherMocks = {}) => {
   const mock = {

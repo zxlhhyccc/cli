@@ -64,6 +64,7 @@ const clearLogs = () => {
 const npm = {
   flatOptions: {
     registry: 'https://registry.npmjs.org/',
+    silent: false,
   },
   version: '7.1.0',
   output: data => {
@@ -211,7 +212,7 @@ t.test('node versions', t => {
         npm.globalDir = dir
         npm.localBin = dir
         npm.globalBin = dir
-        mocks.npmlog.level = 'info'
+        npm.flatOptions.silent = true
 
         st.teardown(() => {
           delete npm.cache
@@ -220,7 +221,7 @@ t.test('node versions', t => {
           delete npm.globalDir
           delete npm.localBin
           delete npm.globalBin
-          mocks.npmlog.level = 'error'
+          npm.flatOptions.silent = false
           clearLogs()
         })
 

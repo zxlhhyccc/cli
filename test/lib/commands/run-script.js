@@ -9,6 +9,7 @@ const cleanOutput = str => normalizePath(str).replace(normalizePath(process.cwd(
 const RUN_SCRIPTS = []
 const flatOptions = {
   scriptShell: undefined,
+  silent: false,
 }
 const config = {
   json: false,
@@ -28,18 +29,12 @@ const npm = mockNpm({
 
 const output = []
 
-const npmlog = {
-  disableProgress: () => null,
-  level: 'warn',
-}
-
 const log = {
   error: () => null,
 }
 
 t.afterEach(() => {
   npm.color = false
-  npmlog.level = 'warn'
   log.error = () => null
   output.length = 0
   RUN_SCRIPTS.length = 0
@@ -58,7 +53,6 @@ const getRS = windows => {
         isServerPackage: require('@npmcli/run-script').isServerPackage,
       }
     ),
-    npmlog,
     'proc-log': log,
     '../../../lib/utils/is-windows-shell.js': windows,
   })
@@ -359,9 +353,9 @@ t.test('skip pre/post hooks when using ignoreScripts', async t => {
 })
 
 t.test('run silent', async t => {
-  npmlog.level = 'silent'
+  flatOptions.silent = true
   t.teardown(() => {
-    npmlog.level = 'warn'
+    flatOptions.silent = false
   })
 
   npm.localPrefix = t.testdir({
@@ -440,12 +434,14 @@ t.test('list scripts', t => {
   })
 
   t.test('silent', async t => {
-    npmlog.level = 'silent'
+    flatOptions.silent = true
+    t.teardown(() => {
+      flatOptions.silent = false
+    })
     await runScript.exec([])
     t.strictSame(output, [])
   })
   t.test('warn json', async t => {
-    npmlog.level = 'warn'
     config.json = true
     await runScript.exec([])
     t.strictSame(output, [[JSON.stringify(scripts, 0, 2)]], 'json report')
@@ -723,7 +719,10 @@ t.test('workspaces', t => {
   })
 
   t.test('list no scripts --loglevel=silent', async t => {
-    npmlog.level = 'silent'
+    flatOptions.silent = true
+    t.teardown(() => {
+      flatOptions.silent = false
+    })
     await runScript.execWorkspaces([], [])
     t.strictSame(output, [])
   })
@@ -860,7 +859,6 @@ t.test('workspaces', t => {
       '@npmcli/run-script': () => {
         throw new Error('err')
       },
-      npmlog,
       'proc-log': log,
       '../../../lib/utils/is-windows-shell.js': false,
     })
@@ -879,7 +877,6 @@ t.test('workspaces', t => {
 
         RUN_SCRIPTS.push(opts)
       },
-      npmlog,
       'proc-log': log,
       '../../../lib/utils/is-windows-shell.js': false,
     })

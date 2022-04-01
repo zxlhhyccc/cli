@@ -3,11 +3,10 @@ name: Release - cli
 on:
   workflow_dispatch:
   pull_request:
-    branches:
-      - 'release/**'
 
 jobs:
   lint-all:
+    if: startsWith(github.head_ref, 'releases/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -20,6 +19,7 @@ jobs:
       - run: node ./bin/npm-cli.js run lint-all
 
   prepublish:
+    if: startsWith(github.head_ref, 'releases/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -31,6 +31,7 @@ jobs:
       - run: make prepublish
 
   test-all:
+    if:  startsWith(github.head_ref, 'releases/')
     strategy:
       fail-fast: false
       matrix:

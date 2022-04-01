@@ -6,7 +6,7 @@ on:
 
 jobs:
   lint-all:
-    if: startsWith(github.head_ref, 'releases/')
+    if: startsWith(github.head_ref, 'release/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -19,7 +19,7 @@ jobs:
       - run: node ./bin/npm-cli.js run lint-all
 
   prepublish:
-    if: startsWith(github.head_ref, 'releases/')
+    if: startsWith(github.head_ref, 'release/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -31,7 +31,7 @@ jobs:
       - run: make prepublish
 
   test-all:
-    if:  startsWith(github.head_ref, 'releases/')
+    if:  startsWith(github.head_ref, 'release/')
     strategy:
       fail-fast: false
       matrix:

@@ -3754,7 +3754,7 @@ exports[`test/lib/docs.js TAP usage prefix > must match snapshot 1`] = `
 Display prefix
 
 Usage:
-npm prefix [-g]
+npm prefix
 
 Options:
 [-g|--global]
@@ -3762,7 +3762,7 @@ Options:
 Run "npm help prefix" for more info
 
 \`\`\`bash
-npm prefix [-g]
+npm prefix
 \`\`\`
 
 Note: This command is unaware of workspaces.

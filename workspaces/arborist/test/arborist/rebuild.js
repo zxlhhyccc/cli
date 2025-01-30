@@ -1,29 +1,26 @@
 const t = require('tap')
 const _trashList = Symbol.for('trashList')
-const Arborist = require('../../lib/arborist/index.js')
-const { resolve, dirname } = require('path')
-const fs = require('fs')
+const Arborist = require('../..')
+const { resolve, dirname } = require('node:path')
+const os = require('node:os')
+const fs = require('node:fs')
 const fixtures = resolve(__dirname, '../fixtures')
 const relpath = require('../../lib/relpath.js')
 const localeCompare = require('@isaacs/string-locale-compare')('en')
+const MockRegistry = require('@npmcli/mock-registry')
 
 const fixture = (t, p) => require(`${fixtures}/reify-cases/${p}`)(t)
 
-const isWindows = process.platform === 'win32'
-const PORT = 12345 + (+process.env.TAP_CHILD_ID || 0)
-
-const server = require('http').createServer(() => {
-  throw new Error('rebuild should not hit the registry')
+// Spin up a new mock registry with no mocks in strict mode so we ensure that no requests are made
+new MockRegistry({
+  strict: true,
+  tap: t,
+  registry: 'https://registry.npmjs.org',
 })
-t.before(() => new Promise(res => {
-  server.listen(PORT, () => {
-    t.teardown(() => server.close())
-    res()
-  })
-}))
 
-const registry = `http://localhost:${PORT}`
-const newArb = opt => new Arborist({ ...opt, registry })
+const isWindows = process.platform === 'win32'
+
+const newArb = opt => new Arborist(opt)
 
 // track the logs that are emitted.  returns a function that removes
 // the listener and provides the list of what it saw.
@@ -185,13 +182,18 @@ t.test('verify dep flags in script environments', async t => {
       localeCompare(patha, pathb) || localeCompare(eventa, eventb))
     .map(({ pkg, event, cmd, code, signal, stdout, stderr }) =>
       ({ pkg, event, cmd, code, signal, stdout, stderr }))
+  t.cleanSnapshot = (input) => {
+    return input.replace(new RegExp(os.tmpdir().replace(/\\/g, '\\\\\\\\'), 'g'), '{TMP}')
+      .replace(/\\\\/g, '/')
+      .replace(/-(.+)\.(?:sh|cmd)/g, '{HASH}')
+  }
   t.matchSnapshot(saved, 'saved script results')
 
   for (const [pkg, flags] of Object.entries(expect)) {
     const file = resolve(path, 'node_modules', pkg, 'env')
     t.strictSame(flags, fs.readFileSync(file, 'utf8').split('\n'), pkg)
   }
-  t.strictSame(checkLogs().sort((a, b) =>
+  t.strictSame(checkLogs().filter(l => l[0] === 'info' && l[1] === 'run').sort((a, b) =>
     localeCompare(a[2], b[2]) || (typeof a[4] === 'string' ? -1 : 1)), [
     ['info', 'run', 'devdep@1.0.0', 'postinstall', 'node_modules/devdep', 'node ../../env.js'],
     ['info', 'run', 'devdep@1.0.0', 'postinstall', { code: 0, signal: null }],
@@ -219,7 +221,7 @@ t.test('run scripts in foreground if foregroundScripts set', async t => {
     },
   })
 
-  const arb = new Arborist({ path, registry, foregroundScripts: true })
+  const arb = new Arborist({ path, foregroundScripts: true })
   await arb.rebuild()
   // add a sentinel to make sure we didn't get too many entries, since
   // t.match() will allow trailing/extra values in the test object.
@@ -408,14 +410,13 @@ t.test('rebuild node-gyp dependencies lacking both preinstall and install script
       },
     }),
   })
-  const arb = new Arborist({ path, registry })
+  const arb = new Arborist({ path })
   await arb.rebuild()
   t.match(RUNS, [
     {
       event: 'install',
       path: resolve(path, 'node_modules/dep'),
       pkg: { scripts: { install: 'node-gyp rebuild' } },
-      stdioString: true,
       env: {
         npm_package_resolved: null,
         npm_package_integrity: null,
@@ -433,7 +434,7 @@ t.test('rebuild node-gyp dependencies lacking both preinstall and install script
 t.test('do not rebuild node-gyp dependencies with gypfile:false', async t => {
   // use require-inject so we don't need an actual massive binary dep fixture
   const Arborist = t.mock('../../lib/arborist/index.js', {
-    '@npmcli/run-script': async opts => {
+    '@npmcli/run-script': async () => {
       throw new Error('should not run any scripts')
     },
   })
@@ -455,8 +456,53 @@ t.test('do not rebuild node-gyp dependencies with gypfile:false', async t => {
       },
     }),
   })
-  const arb = new Arborist({ path, registry })
+  const arb = new Arborist({ path })
   await arb.rebuild()
+})
+
+// ref: https://github.com/npm/cli/issues/2905
+t.test('do not run lifecycle scripts of linked deps twice', async t => {
+  const testdir = t.testdir({
+    project: {
+      'package.json': JSON.stringify({
+        name: 'my-project',
+        version: '1.0.0',
+        dependencies: {
+          foo: 'file:../foo',
+        },
+      }),
+      node_modules: {
+        foo: t.fixture('symlink', '../../foo'),
+      },
+    },
+    foo: {
+      'package.json': JSON.stringify({
+        name: 'foo',
+        version: '1.0.0',
+        scripts: {
+          postinstall: 'echo "ok"',
+        },
+      }),
+    },
+  })
+
+  const path = resolve(testdir, 'project')
+  const RUNS = []
+  const Arborist = t.mock('../../lib/arborist/index.js', {
+    '@npmcli/run-script': opts => {
+      RUNS.push(opts)
+      return require('@npmcli/run-script')(opts)
+    },
+  })
+  const arb = new Arborist({ path })
+  await arb.rebuild()
+  t.equal(RUNS.length, 1, 'should run postinstall script only once')
+  t.match(RUNS, [
+    {
+      event: 'postinstall',
+      pkg: { name: 'foo' },
+    },
+  ])
 })
 
 t.test('workspaces', async t => {
@@ -494,7 +540,7 @@ t.test('workspaces', async t => {
       return require('@npmcli/run-script')(opts)
     },
   })
-  const arb = new Arborist({ path, registry })
+  const arb = new Arborist({ path })
 
   await arb.rebuild()
   t.equal(RUNS.length, 2, 'should run prepare script only once per ws')
@@ -543,7 +589,7 @@ t.test('workspaces', async t => {
         return { code: 0, signal: null }
       },
     })
-    const arb = new Arborist({ path, registry, binLinks: false })
+    const arb = new Arborist({ path, binLinks: false })
 
     await arb.rebuild()
     t.equal(RUNS.length, 1, 'should run prepare script only once')
@@ -591,7 +637,7 @@ t.test('workspaces', async t => {
         return { code: 0, signal: null }
       },
     })
-    const arb = new Arborist({ path, registry })
+    const arb = new Arborist({ path })
 
     await arb.rebuild()
     t.equal(RUNS.length, 1, 'should run prepare script only once')
@@ -754,7 +800,6 @@ t.test('no workspaces', async t => {
   })
   const arb = new Arborist({
     path,
-    registry,
     workspacesEnabled: false,
   })
 
@@ -766,4 +811,39 @@ t.test('no workspaces', async t => {
       pkg: { name: 'no-workspaces-powered-project' },
     },
   ])
+})
+
+t.test('do not run lifecycle scripts of linked deps twice', async t => {
+  const testdir = t.testdir({
+    project: {
+      'package.json': JSON.stringify({
+        name: 'my-project',
+        version: '1.0.0',
+        dependencies: {
+          foo: 'file:../foo',
+        },
+      }),
+      node_modules: {
+        foo: t.fixture('symlink', '../../foo'),
+      },
+    },
+    foo: {
+      'package.json': JSON.stringify({
+        name: 'foo',
+        version: '1.0.0',
+        scripts: {
+          postinstall: 'echo "ok"',
+        },
+      }),
+    },
+  })
+
+  const path = resolve(testdir, 'project')
+  const Arborist = t.mock('../../lib/arborist/index.js', {
+    '@npmcli/run-script': () => {
+      throw new Error('should not run any scripts')
+    },
+  })
+  const arb = new Arborist({ path, ignoreScripts: true })
+  await arb.rebuild()
 })

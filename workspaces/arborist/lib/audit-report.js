@@ -13,9 +13,9 @@ const _fixAvailable = Symbol('fixAvailable')
 const _checkTopNode = Symbol('checkTopNode')
 const _init = Symbol('init')
 const _omit = Symbol('omit')
-const log = require('proc-log')
+const { log, time } = require('proc-log')
 
-const fetch = require('npm-registry-fetch')
+const npmFetch = require('npm-registry-fetch')
 
 class AuditReport extends Map {
   static load (tree, opts) {
@@ -117,7 +117,7 @@ class AuditReport extends Map {
   }
 
   async [_init] () {
-    process.emit('time', 'auditReport:init')
+    const timeEnd = time.start('auditReport:init')
 
     const promises = []
     for (const [name, advisories] of Object.entries(this.report)) {
@@ -134,16 +134,7 @@ class AuditReport extends Map {
     const seen = new Set()
     for (const advisory of advisories) {
       const { name, range } = advisory
-
-      // don't flag the exact same name/range more than once
-      // adding multiple advisories with the same range is fine, but no
-      // need to search for nodes we already would have added.
       const k = `${name}@${range}`
-      if (seen.has(k)) {
-        continue
-      }
-
-      seen.add(k)
 
       const vuln = this.get(name) || new Vuln({ name, advisory })
       if (this.has(name)) {
@@ -151,44 +142,52 @@ class AuditReport extends Map {
       }
       super.set(name, vuln)
 
-      const p = []
-      for (const node of this.tree.inventory.query('packageName', name)) {
-        if (!shouldAudit(node, this[_omit], this.filterSet)) {
-          continue
-        }
+      // don't flag the exact same name/range more than once
+      // adding multiple advisories with the same range is fine, but no
+      // need to search for nodes we already would have added.
+      if (!seen.has(k)) {
+        const p = []
+        for (const node of this.tree.inventory.query('packageName', name)) {
+          if (!shouldAudit(node, this[_omit], this.filterSet)) {
+            continue
+          }
 
-        // if not vulnerable by this advisory, keep searching
-        if (!advisory.testVersion(node.version)) {
-          continue
-        }
+          // if not vulnerable by this advisory, keep searching
+          if (!advisory.testVersion(node.version)) {
+            continue
+          }
 
-        // we will have loaded the source already if this is a metavuln
-        if (advisory.type === 'metavuln') {
-          vuln.addVia(this.get(advisory.dependency))
-        }
+          // we will have loaded the source already if this is a metavuln
+          if (advisory.type === 'metavuln') {
+            vuln.addVia(this.get(advisory.dependency))
+          }
 
-        // already marked this one, no need to do it again
-        if (vuln.nodes.has(node)) {
-          continue
-        }
+          // already marked this one, no need to do it again
+          if (vuln.nodes.has(node)) {
+            continue
+          }
 
-        // haven't marked this one yet.  get its dependents.
-        vuln.nodes.add(node)
-        for (const { from: dep, spec } of node.edgesIn) {
-          if (dep.isTop && !vuln.topNodes.has(dep)) {
-            this[_checkTopNode](dep, vuln, spec)
-          } else {
+          // haven't marked this one yet.  get its dependents.
+          vuln.nodes.add(node)
+          for (const { from: dep, spec } of node.edgesIn) {
+            if (dep.isTop && !vuln.topNodes.has(dep)) {
+              this[_checkTopNode](dep, vuln, spec)
+            } else {
             // calculate a metavuln, if necessary
-            const calc = this.calculator.calculate(dep.packageName, advisory)
-            p.push(calc.then(meta => {
-              if (meta.testVersion(dep.version, spec)) {
-                advisories.add(meta)
-              }
-            }))
+              const calc = this.calculator.calculate(dep.packageName, advisory)
+              // eslint-disable-next-line promise/always-return
+              p.push(calc.then(meta => {
+                // eslint-disable-next-line promise/always-return
+                if (meta.testVersion(dep.version, spec)) {
+                  advisories.add(meta)
+                }
+              }))
+            }
           }
         }
+        await Promise.all(p)
+        seen.add(k)
       }
-      await Promise.all(p)
 
       // make sure we actually got something.  if not, remove it
       // this can happen if you are loading from a lockfile created by
@@ -211,7 +210,8 @@ class AuditReport extends Map {
         }
       }
     }
-    process.emit('timeEnd', 'auditReport:init')
+
+    timeEnd()
   }
 
   [_checkTopNode] (topNode, vuln, spec) {
@@ -274,81 +274,39 @@ class AuditReport extends Map {
     throw new Error('do not call AuditReport.set() directly')
   }
 
-  // convert a quick-audit into a bulk advisory listing
-  static auditToBulk (report) {
-    if (!report.advisories) {
-      // tack on the report json where the response body would go
-      throw Object.assign(new Error('Invalid advisory report'), {
-        body: JSON.stringify(report),
-      })
-    }
-
-    const bulk = {}
-    const { advisories } = report
-    for (const advisory of Object.values(advisories)) {
-      const {
-        id,
-        url,
-        title,
-        severity = 'high',
-        vulnerable_versions = '*',
-        module_name: name,
-      } = advisory
-      bulk[name] = bulk[name] || []
-      bulk[name].push({ id, url, title, severity, vulnerable_versions })
-    }
-
-    return bulk
-  }
-
   async [_getReport] () {
     // if we're not auditing, just return false
     if (this.options.audit === false || this.options.offline === true || this.tree.inventory.size === 1) {
       return null
     }
 
-    process.emit('time', 'auditReport:getReport')
+    const timeEnd = time.start('auditReport:getReport')
     try {
-      try {
-        // first try the super fast bulk advisory listing
-        const body = prepareBulkData(this.tree, this[_omit], this.filterSet)
-        log.silly('audit', 'bulk request', body)
+      const body = prepareBulkData(this.tree, this[_omit], this.filterSet)
+      log.silly('audit', 'bulk request', body)
 
-        // no sense asking if we don't have anything to audit,
-        // we know it'll be empty
-        if (!Object.keys(body).length) {
-          return null
-        }
-
-        const res = await fetch('/-/npm/v1/security/advisories/bulk', {
-          ...this.options,
-          registry: this.options.auditRegistry || this.options.registry,
-          method: 'POST',
-          gzip: true,
-          body,
-        })
-
-        return await res.json()
-      } catch (er) {
-        log.silly('audit', 'bulk request failed', String(er.body))
-        // that failed, try the quick audit endpoint
-        const body = prepareData(this.tree, this.options)
-        const res = await fetch('/-/npm/v1/security/audits/quick', {
-          ...this.options,
-          registry: this.options.auditRegistry || this.options.registry,
-          method: 'POST',
-          gzip: true,
-          body,
-        })
-        return AuditReport.auditToBulk(await res.json())
+      // no sense asking if we don't have anything to audit,
+      // we know it'll be empty
+      if (!Object.keys(body).length) {
+        return null
       }
+
+      const res = await npmFetch('/-/npm/v1/security/advisories/bulk', {
+        ...this.options,
+        registry: this.options.auditRegistry || this.options.registry,
+        method: 'POST',
+        gzip: true,
+        body,
+      })
+
+      return await res.json()
     } catch (er) {
       log.verbose('audit error', er)
       log.silly('audit error', String(er.body))
       this.error = er
       return null
     } finally {
-      process.emit('timeEnd', 'auditReport:getReport')
+      timeEnd()
     }
   }
 }
@@ -382,34 +340,6 @@ const prepareBulkData = (tree, omit, filterSet) => {
     }
   }
   return payload
-}
-
-const prepareData = (tree, opts) => {
-  const { npmVersion: npm_version } = opts
-  const node_version = process.version
-  const { platform, arch } = process
-  const { NODE_ENV: node_env } = process.env
-  const data = tree.meta.commit()
-  // the legacy audit endpoint doesn't support any kind of pre-filtering
-  // we just have to get the advisories and skip over them in the report
-  return {
-    name: data.name,
-    version: data.version,
-    requires: {
-      ...(tree.package.devDependencies || {}),
-      ...(tree.package.peerDependencies || {}),
-      ...(tree.package.optionalDependencies || {}),
-      ...(tree.package.dependencies || {}),
-    },
-    dependencies: data.dependencies,
-    metadata: {
-      node_version,
-      npm_version,
-      platform,
-      arch,
-      node_env,
-    },
-  }
 }
 
 module.exports = AuditReport

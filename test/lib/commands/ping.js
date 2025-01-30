@@ -1,113 +1,94 @@
 const t = require('tap')
-const { fake: mockNpm } = require('../../fixtures/mock-npm')
+const { load: loadMockNpm } = require('../../fixtures/mock-npm.js')
+const MockRegistry = require('@npmcli/mock-registry')
+const cacache = require('cacache')
+const path = require('node:path')
 
-t.test('pings', async t => {
-  t.plan(6)
-
-  const registry = 'https://registry.npmjs.org'
-  let noticeCalls = 0
-  const Ping = t.mock('../../../lib/commands/ping.js', {
-    '../../../lib/utils/ping.js': function (spec) {
-      t.equal(spec.registry, registry, 'passes flatOptions')
-      return {}
-    },
-    'proc-log': {
-      notice: (type, spec) => {
-        ++noticeCalls
-        if (noticeCalls === 1) {
-          t.equal(type, 'PING', 'should log a PING')
-          t.equal(spec, registry, 'should log the registry url')
-        } else {
-          t.equal(type, 'PONG', 'should log a PONG')
-          t.match(spec, /\d+ms/, 'should log the elapsed milliseconds')
-        }
-      },
-    },
+t.test('no details', async t => {
+  const { npm, logs, joinedOutput } = await loadMockNpm(t)
+  const registry = new MockRegistry({
+    tap: t,
+    registry: npm.config.get('registry'),
   })
-  const npm = mockNpm({
-    config: { registry },
-    flatOptions: { registry },
-  })
-  const ping = new Ping(npm)
-
-  await ping.exec([])
-  t.equal(noticeCalls, 2, 'should have logged 2 lines')
+  registry.ping()
+  await npm.exec('ping', [])
+  t.match(logs.notice, [
+    'PING https://registry.npmjs.org/',
+    /PONG [0-9]+ms/,
+  ])
+  t.equal(joinedOutput(), '')
 })
 
-t.test('pings and logs details', async t => {
-  t.plan(8)
-
-  const registry = 'https://registry.npmjs.org'
-  const details = { extra: 'data' }
-  let noticeCalls = 0
-  const Ping = t.mock('../../../lib/commands/ping.js', {
-    '../../../lib/utils/ping.js': function (spec) {
-      t.equal(spec.registry, registry, 'passes flatOptions')
-      return details
-    },
-    'proc-log': {
-      notice: (type, spec) => {
-        ++noticeCalls
-        if (noticeCalls === 1) {
-          t.equal(type, 'PING', 'should log a PING')
-          t.equal(spec, registry, 'should log the registry url')
-        } else if (noticeCalls === 2) {
-          t.equal(type, 'PONG', 'should log a PONG')
-          t.match(spec, /\d+ms/, 'should log the elapsed milliseconds')
-        } else {
-          t.equal(type, 'PONG', 'should log a PONG')
-          const parsed = JSON.parse(spec)
-          t.match(parsed, details, 'should log JSON stringified details')
-        }
-      },
-    },
+t.test('with details', async t => {
+  const { npm, logs, joinedOutput } = await loadMockNpm(t)
+  const registry = new MockRegistry({
+    tap: t,
+    registry: npm.config.get('registry'),
   })
-  const npm = mockNpm({
-    config: { registry },
-    flatOptions: { registry },
-  })
-  const ping = new Ping(npm)
-
-  await ping.exec([])
-  t.equal(noticeCalls, 3, 'should have logged 3 lines')
+  registry.ping({ body: { test: true, test2: true } })
+  await npm.exec('ping', [])
+  t.match(logs.notice, [
+    `PING https://registry.npmjs.org/`,
+    /PONG [0-9]+ms/,
+    `PONG {\nPONG   "test": true,\nPONG   "test2": true\nPONG }`,
+  ])
+  t.match(joinedOutput(), '')
 })
 
-t.test('pings and returns json', async t => {
-  t.plan(9)
-
-  const registry = 'https://registry.npmjs.org'
-  const details = { extra: 'data' }
-  let noticeCalls = 0
-  const Ping = t.mock('../../../lib/commands/ping.js', {
-    '../../../lib/utils/ping.js': function (spec) {
-      t.equal(spec.registry, registry, 'passes flatOptions')
-      return details
-    },
-    'proc-log': {
-      notice: (type, spec) => {
-        ++noticeCalls
-        if (noticeCalls === 1) {
-          t.equal(type, 'PING', 'should log a PING')
-          t.equal(spec, registry, 'should log the registry url')
-        } else {
-          t.equal(type, 'PONG', 'should log a PONG')
-          t.match(spec, /\d+ms/, 'should log the elapsed milliseconds')
-        }
-      },
-    },
+t.test('valid json', async t => {
+  const { npm, logs, joinedOutput } = await loadMockNpm(t, {
+    config: { json: true },
   })
-  const npm = mockNpm({
-    config: { registry, json: true },
-    flatOptions: { registry },
-    output: function (spec) {
-      const parsed = JSON.parse(spec)
-      t.equal(parsed.registry, registry, 'returns the correct registry url')
-      t.match(parsed.details, details, 'prints returned details')
-      t.type(parsed.time, 'number', 'returns time as a number')
-    },
+  const registry = new MockRegistry({
+    tap: t,
+    registry: npm.config.get('registry'),
   })
-  const ping = new Ping(npm)
+  registry.ping()
+  await npm.exec('ping', [])
+  t.match(logs.notice, [
+    'PING https://registry.npmjs.org/',
+    /PONG [0-9]+ms/,
+  ])
+  t.match(JSON.parse(joinedOutput()), {
+    registry: npm.config.get('registry'),
+    time: /[0-9]+/,
+    details: {},
+  })
+})
 
-  await ping.exec([])
-  t.equal(noticeCalls, 2, 'should have logged 2 lines')
+t.test('invalid json', async t => {
+  const { npm, logs, joinedOutput } = await loadMockNpm(t, {
+    config: { json: true },
+  })
+  const registry = new MockRegistry({
+    tap: t,
+    registry: npm.config.get('registry'),
+  })
+  registry.ping({ body: '{not: real"json]' })
+  await npm.exec('ping', [])
+  t.match(logs.notice, [
+    'PING https://registry.npmjs.org/',
+    /PONG [0-9]+ms/,
+  ])
+  t.match(JSON.parse(joinedOutput()), {
+    registry: npm.config.get('registry'),
+    time: /[0-9]+/,
+    details: {},
+  })
+})
+t.test('fail when registry is unreachable even if request is cached', async t => {
+  const { npm } = await loadMockNpm(t, {
+    config: { registry: 'https://ur.npmlocal.npmtest/' },
+    cacheDir: { _cacache: {} },
+  })
+  const url = `${npm.config.get('registry')}-/ping`
+  const cache = path.join(npm.cache, '_cacache')
+  await cacache.put(cache,
+    `make-fetch-happen:request-cache:${url}`,
+    '{}', { metadata: { url } }
+  )
+  t.rejects(npm.exec('ping', []), {
+    code: 'ENOTFOUND',
+  },
+  'throws ENOTFOUND error')
 })
